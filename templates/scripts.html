@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Скрипты{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>📜 Библиотека скриптов</h2>
+        <div>
+            <button class="btn btn-success" onclick="location.reload()">🔄 Обновить</button>
+        </div>
+    </div>
+
+    <div style="margin-bottom: 1rem; padding: 1rem; background: #e9ecef; border-radius: 5px;">
+        <p style="margin: 0; color: #495057;">
+            Здесь отображаются все скрипты из папки <code>scripts/</code>.
+            Вы можете скачать любой скрипт в виде текстового файла.
+        </p>
+    </div>
+
+    <div id="scriptsList">
+        <!-- Скрипты загрузятся через JS -->
+        <div style="text-align: center; padding: 2rem; color: #6c757d;">
+            ⏳ Загрузка скриптов...
+        </div>
+    </div>
+</div>
+
+<script>
+    function loadScripts() {
+        fetch('/api/scripts/list')
+            .then(response => response.json())
+            .then(scripts => {
+                const container = document.getElementById('scriptsList');
+
+                if (scripts.length === 0) {
+                    container.innerHTML = `
+                        <div class="alert alert-warning" style="text-align: center;">
+                            📭 Скрипты не найдены. Добавьте файлы .py в папку <code>scripts/</code>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '<div style="display: grid; gap: 1rem;">';
+
+                scripts.forEach(script => {
+                    html += `
+                        <div style="background: white; border: 1px solid #dee2e6; border-radius: 5px; padding: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div style="flex: 1;">
+                                    <h3 style="margin: 0 0 0.5rem 0;">${script.name}</h3>
+                                    <p style="color: #6c757d; margin: 0 0 0.5rem 0;">${script.description}</p>
+                                    <div style="font-size: 0.9rem; color: #495057;">
+                                        <span style="background: #e9ecef; padding: 0.2rem 0.5rem; border-radius: 3px;">
+                                            📁 ${script.filename}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <a href="/api/scripts/${script.id}/download" class="btn btn-success" download>
+                                        📥 Скачать
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+                container.innerHTML = html;
+            })
+            .catch(error => {
+                document.getElementById('scriptsList').innerHTML = `
+                    <div class="alert alert-danger" style="text-align: center;">
+                        ❌ Ошибка загрузки скриптов: ${error}
+                    </div>
+                `;
+            });
+    }
+
+    // Загружаем скрипты при загрузке страницы
+    document.addEventListener('DOMContentLoaded', loadScripts);
+</script>
+{% endblock %}

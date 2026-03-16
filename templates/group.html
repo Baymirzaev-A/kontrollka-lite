@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+
+{% block title %}Групповая консоль{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h2>👥 Групповая консоль</h2>
+            <p style="color: #6c757d;">Выполнение команды на нескольких устройствах одновременно</p>
+        </div>
+        <div>
+            <a href="/" class="btn btn-secondary">← К списку устройств</a>
+        </div>
+    </div>
+
+    <!-- Выбранные устройства -->
+    <div style="margin-bottom: 1.5rem; padding: 1rem; background: #f8f9fa; border-radius: 5px;">
+        <h3 style="margin-bottom: 1rem;">📋 Выбранные устройства:</h3>
+        <div id="selectedDevicesList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;"></div>
+        <div id="noDevicesMessage" style="display: none; color: #dc3545; padding: 1rem; text-align: center;">
+            ❌ Нет выбранных устройств. <a href="/" style="color: #007bff;">Вернуться к списку</a>
+        </div>
+    </div>
+
+    <!-- Поле для команды -->
+    <div style="margin-bottom: 2rem;">
+        <h3 style="margin-bottom: 1rem;">⌨️ Команда для выполнения:</h3>
+        <div style="display: flex; gap: 0.5rem;">
+            <input type="text" id="groupCommand" class="form-control"
+                   placeholder="Введите команду (например: display version)"
+                   autocomplete="off" style="font-family: 'Courier New', monospace;">
+            <button onclick="executeGroupCommand()" class="btn btn-primary" id="executeBtn">🚀 Выполнить на всех</button>
+            <button onclick="clearResults()" class="btn btn-secondary">🧹 Очистить</button>
+        </div>
+        <div style="margin-top: 0.5rem; color: #6c757d; font-size: 0.9rem;">
+            ⚡ Логин/пароль для всех устройств: admin / DefHccb01
+        </div>
+    </div>
+
+    <!-- Индикатор выполнения -->
+    <div id="progressBar" style="display: none; margin-bottom: 1rem;">
+        <div style="background: #e9ecef; border-radius: 5px; height: 20px; overflow: hidden;">
+            <div id="progressFill" style="background: #28a745; width: 0%; height: 100%; transition: width 0.3s;"></div>
+        </div>
+        <div id="progressText" style="text-align: center; margin-top: 0.5rem;"></div>
+    </div>
+
+    <!-- Результаты -->
+    <div id="results">
+        <h3 style="margin-bottom: 1rem;">📊 Результаты:</h3>
+        <div id="resultsContainer"></div>
+    </div>
+</div>
+
+<script>
+    let selectedDevices = [];
+    let deviceDetails = {};
+
+    // Загружаем выбранные устройства из sessionStorage
+    document.addEventListener('DOMContentLoaded', async function() {
+        const saved = sessionStorage.getItem('selectedDevices');
+        if (saved) {
+            selectedDevices = JSON.parse(saved);
+            await loadSelectedDevices();
+        } else {
+            showNoDevices();
+        }
+    });
+
+    async function loadSelectedDevices() {
+        const container = document.getElementById('selectedDevicesList');
+        const noDevicesMsg = document.getElementById('noDevicesMessage');
+
+        if (selectedDevices.length === 0) {
+            showNoDevices();
+            return;
+        }
+
+        noDevicesMsg.style.display = 'none';
+
+        // Загружаем информацию о каждом устройстве
+        const devicePromises = selectedDevices.map(id =>
+            fetch(`/api/device/${id}`).then(r => r.json())
+        );
+
+        const devices = await Promise.all(devicePromises);
+
+        devices.forEach(d => {
+            deviceDetails[d.id] = d;
+        });
+
+        container.innerHTML = devices.map(d =>
+            `<span style="background: #007bff; color: white; padding: 0.4rem 1rem; border-radius: 20px; font-size: 0.9rem; display: inline-flex; align-items: center;">
+                🖥️ ${d.name} (${d.host})
+                <span style="margin-left: 0.5rem; cursor: pointer;" onclick="removeDevice(${d.id})">✖</span>
+            </span>`
+        ).join('');
+    }
+
+    function showNoDevices() {
+        document.getElementById('selectedDevicesList').innerHTML = '';
+        document.getElementById('noDevicesMessage').style.display = 'block';
+        document.getElementById('executeBtn').disabled = true;
+    }
+
+    function removeDevice(deviceId) {
+        selectedDevices = selectedDevices.filter(id => id != deviceId);
+        sessionStorage.setItem('selectedDevices', JSON.stringify(selectedDevices));
+        loadSelectedDevices();
+    }
+
+    function showProgress(current, total) {
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+
+        progressBar.style.display = 'block';
+        const percent = Math.round((current / total) * 100);
+        progressFill.style.width = percent + '%';
+        progressText.textContent = `Выполнено: ${current} из ${total} устройств (${percent}%)`;
+    }
+
+    function hideProgress() {
+        document.getElementById('progressBar').style.display = 'none';
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/ /g, '&nbsp;')
+            .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
+            .replace(/\n/g, '<br>');
+    }
+
+    function formatOutput(output) {
+        return escapeHtml(output);
+    }
+
+    function toggleResult(index) {
+        const element = document.getElementById(`result-${index}`);
+        if (element) {
+            if (element.style.display === 'none') {
+                element.style.display = 'block';
+            } else {
+                element.style.display = 'none';
+            }
+        }
+    }
+
+    async function executeGroupCommand() {
+    const command = document.getElementById('groupCommand').value.trim();
+
+    if (!command) {
+        alert('Введите команду');
+        return;
+    }
+
+    if (selectedDevices.length === 0) {
+        alert('Нет выбранных устройств');
+        return;
+    }
+
+    // Показываем индикатор загрузки
+    showLoading();
+    document.getElementById('resultsContainer').innerHTML = '<div style="text-align: center; padding: 2rem;">⏳ Выполняется команда на устройствах...</div>';
+
+    try {
+        const response = await fetch('/api/group/execute', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                command: command,
+                device_ids: selectedDevices
+            })
+        });
+
+        const data = await response.json();
+        hideLoading();
+
+        if (data.error) {
+            document.getElementById('resultsContainer').innerHTML =
+                `<div class="alert alert-danger">${data.error}</div>`;
+            return;
+        }
+
+        displayResults(data.results, command);
+
+    } catch (error) {
+        hideLoading();
+        document.getElementById('resultsContainer').innerHTML =
+            `<div class="alert alert-danger">Ошибка соединения: ${error}</div>`;
+    }
+}
+
+    function displayResults(results, command) {
+        const container = document.getElementById('resultsContainer');
+        let successCount = 0;
+        let errorCount = 0;
+
+        results.forEach(r => {
+            if (r.success) successCount++; else errorCount++;
+        });
+
+        let html = `
+            <div style="margin-bottom: 1.5rem; padding: 1rem; background: #e9ecef; border-radius: 5px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>Команда:</strong> <code style="background: #1e1e1e; color: #d4d4d4; padding: 0.2rem 0.5rem; border-radius: 3px;">${command}</code>
+                    </div>
+                    <div>
+                        <span style="background: #17a2b8; color: white; padding: 0.2rem 0.5rem; border-radius: 3px; margin-right: 0.3rem;">Всего: ${results.length}</span>
+                        <span style="background: #28a745; color: white; padding: 0.2rem 0.5rem; border-radius: 3px; margin-right: 0.3rem;">✅ ${successCount}</span>
+                        <span style="background: #dc3545; color: white; padding: 0.2rem 0.5rem; border-radius: 3px;">❌ ${errorCount}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        results.forEach((result, index) => {
+            const deviceName = result.device_name || 'Неизвестно';
+
+            if (result.success) {
+                html += `
+                    <div style="margin-top: 1rem; border: 1px solid #28a745; border-radius: 5px;">
+                        <div style="background: #28a745; color: white; padding: 0.5rem 1rem; border-radius: 5px 5px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                            <span>✅ ${deviceName}</span>
+                            <span style="cursor: pointer; font-size: 1.2rem;" onclick="toggleResult(${index})">▼</span>
+                        </div>
+                        <div id="result-${index}" style="background: #1e1e1e; color: #d4d4d4; padding: 1rem; font-family: 'Courier New', monospace; white-space: pre-wrap; overflow-x: auto; max-height: 400px; overflow-y: auto;">
+                            ${escapeHtml(result.output)}
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div style="margin-top: 1rem; border: 1px solid #dc3545; border-radius: 5px;">
+                        <div style="background: #dc3545; color: white; padding: 0.5rem 1rem; border-radius: 5px 5px 0 0;">
+                            ❌ ${deviceName} - Ошибка
+                        </div>
+                        <div style="background: #1e1e1e; color: #ff6b6b; padding: 1rem; font-family: 'Courier New', monospace;">
+                            ${escapeHtml(result.error || 'Неизвестная ошибка')}
+                        </div>
+                    </div>
+                `;
+            }
+        });
+
+        // Кнопка скачивания
+        html += `
+            <div style="margin-top: 2rem; text-align: center;">
+                <button onclick="downloadResults()" class="btn btn-success">
+                    📥 Скачать все результаты (${results.length} устройств)
+                </button>
+            </div>
+        `;
+
+        container.innerHTML = html;
+
+        // Сохраняем для скачивания
+        window.lastResults = results;
+        window.lastCommand = command;
+    }
+
+    function downloadResults() {
+        if (!window.lastResults || !window.lastCommand) return;
+
+        let text = `РЕЗУЛЬТАТЫ ВЫПОЛНЕНИЯ КОМАНДЫ\n`;
+        text += `Команда: ${window.lastCommand}\n`;
+        text += `Дата: ${new Date().toLocaleString()}\n`;
+        text += `Всего устройств: ${window.lastResults.length}\n`;
+        text += `Успешно: ${window.lastResults.filter(r => r.success).length}\n`;
+        text += `Ошибок: ${window.lastResults.filter(r => !r.success).length}\n`;
+        text += `==================================================\n\n`;
+
+        window.lastResults.forEach(r => {
+            const device = deviceDetails[r.device_id] || { name: r.device_name || 'Неизвестно' };
+            text += `УСТРОЙСТВО: ${device.name}\n`;
+
+            if (r.success) {
+                text += `ВЫВОД:\n${r.output}\n`;
+            } else {
+                text += `ОШИБКА: ${r.error}\n`;
+            }
+            text += `------------------------------------------\n\n`;
+        });
+
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `group_command_${new Date().getTime()}.txt`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+    }
+
+    function clearResults() {
+        document.getElementById('resultsContainer').innerHTML = '';
+        document.getElementById('groupCommand').value = '';
+        window.lastResults = null;
+    }
+
+    // Обработка Enter
+    document.getElementById('groupCommand').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            executeGroupCommand();
+        }
+    });
+</script>
+
+<style>
+    .result-header {
+        cursor: pointer;
+        user-select: none;
+    }
+    .result-header:hover {
+        opacity: 0.9;
+    }
+</style>
+{% endblock %}

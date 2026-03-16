@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}{{ device.name }} - Консоль{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <div>
+            <h2>{{ device.name }}</h2>
+            <p style="color: #6c757d;">{{ device.host }}:{{ device.port }} | {{ device.description }}</p>
+        </div>
+        <div>
+            <a href="/" class="btn btn-secondary">← К списку</a>
+        </div>
+    </div>
+
+    <!-- Информация о подключении (без формы ввода) -->
+    <div style="margin-bottom: 1rem; padding: 1rem; background: #d4edda; border-radius: 5px; color: #155724; display: flex; align-items: center; gap: 0.5rem;">
+        <span style="font-size: 1.2rem;">🔌</span>
+        <span><strong>Подключение:</strong> Используются общие учетные данные (admin / DefHccb01)</span>
+    </div>
+
+    <!-- Консоль -->
+    <div style="margin-bottom: 1rem;">
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+            <input type="text" id="command" class="form-control" placeholder="Введите команду (например: display version)"
+                   autocomplete="off" style="font-family: 'Courier New', monospace;">
+            <button onclick="executeCommand()" id="execute-btn" class="btn btn-primary">Выполнить</button>
+            <button onclick="saveConfig()" id="save-config-btn" class="btn btn-warning">Сохранить конфиг</button>
+            <button onclick="clearOutput()" class="btn btn-secondary">Очистить</button>
+        </div>
+
+        <div style="background: #1e1e1e; color: #d4d4d4; font-family: 'Courier New', monospace; padding: 1rem;
+                    border-radius: 5px; min-height: 400px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4;" id="output">
+            <span style="color: #6a9955;"># Готов к работе. Введите команду для устройства {{ device.name }}.</span>
+        </div>
+    </div>
+
+    <!-- История команд и сохраненные конфигурации -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div class="card" style="padding: 1rem;">
+            <h3 style="margin-bottom: 0.5rem;">История команд</h3>
+            <div id="command-history" style="max-height: 200px; overflow-y: auto;">
+                <div style="color: #6c757d;">Загрузка...</div>
+            </div>
+        </div>
+
+        <div class="card" style="padding: 1rem;">
+            <h3 style="margin-bottom: 0.5rem;">Сохраненные конфигурации</h3>
+            <div id="config-history" style="max-height: 200px; overflow-y: auto;">
+                <div style="color: #6c757d;">Загрузка...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let deviceId = {{ device.id }};
+    let deviceName = "{{ device.name }}";
+
+    function executeCommand() {
+        const command = document.getElementById('command').value.trim();
+
+        if (!command) {
+            alert('Введите команду');
+            return;
+        }
+
+        showLoading();
+
+        fetch(`/api/device/${deviceId}/execute`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({command: command})
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+
+            if (data.error) {
+                document.getElementById('output').innerHTML +=
+                    `\n<span style="color: #f14c4c;">Ошибка: ${data.error}</span>`;
+            } else {
+                const outputDiv = document.getElementById('output');
+
+                // Добавляем промпт с именем устройства
+                outputDiv.innerHTML += `\n<span style="color: #4ec9b0;">[${deviceName}]</span> <span style="color: #d4d4d4;">${command}</span>\n`;
+
+                // СОХРАНЯЕМ ФОРМАТИРОВАНИЕ КОНСОЛИ
+                let formattedOutput = data.output
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/ /g, '&nbsp;')
+                    .replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;')
+                    .replace(/\n/g, '<br>');
+
+                outputDiv.innerHTML += `<span style="color: #d4d4d4;">${formattedOutput}</span>\n`;
+
+                document.getElementById('command').value = '';
+                loadCommandHistory();
+            }
+
+            const outputDiv = document.getElementById('output');
+            outputDiv.scrollTop = outputDiv.scrollHeight;
+        })
+        .catch(error => {
+            hideLoading();
+            alert('Ошибка: ' + error);
+        });
+    }
+
+    function saveConfig() {
+        showLoading();
+
+        fetch(`/api/device/${deviceId}/save_config`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                alert('Конфигурация сохранена');
+                loadConfigHistory();
+            } else {
+                alert('Ошибка: ' + data.error);
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            alert('Ошибка: ' + error);
+        });
+    }
+
+    function clearOutput() {
+        document.getElementById('output').innerHTML =
+            '<span style="color: #6a9955;"># Вывод очищен.</span>';
+    }
+
+    function loadCommandHistory() {
+        fetch(`/api/device/${deviceId}/history`)
+            .then(response => response.json())
+            .then(history => {
+                const container = document.getElementById('command-history');
+                if (history.length === 0) {
+                    container.innerHTML = '<div style="color: #6c757d;">История пуста</div>';
+                    return;
+                }
+
+                container.innerHTML = history.map(item =>
+                    `<div style="padding: 0.3rem 0; border-bottom: 1px solid #e9ecef; cursor: pointer;"
+                          onclick="useCommand('${item.command.replace(/'/g, "\\'")}')">
+                        <small style="color: #6c757d;">${new Date(item.executed_at).toLocaleTimeString()}</small>
+                        <div style="font-family: monospace;">${item.command}</div>
+                     </div>`
+                ).join('');
+            });
+    }
+
+    function loadConfigHistory() {
+        fetch(`/api/device/${deviceId}/configs`)
+            .then(response => response.json())
+            .then(configs => {
+                const container = document.getElementById('config-history');
+                if (configs.length === 0) {
+                    container.innerHTML = '<div style="color: #6c757d;">Нет сохраненных конфигураций</div>';
+                    return;
+                }
+
+                container.innerHTML = configs.map(config =>
+                    `<div style="padding: 0.3rem 0; border-bottom: 1px solid #e9ecef;"
+                          onclick="window.location.href='/config/${config.id}'">
+                        <small style="color: #6c757d;">${new Date(config.saved_at).toLocaleString()}</small>
+                        <div>Конфигурация #${config.id}</div>
+                     </div>`
+                ).join('');
+            });
+    }
+
+    function useCommand(cmd) {
+        document.getElementById('command').value = cmd;
+    }
+
+    // Обработка Enter
+    document.getElementById('command').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            executeCommand();
+        }
+    });
+
+    // Загружаем историю при старте
+    loadCommandHistory();
+    loadConfigHistory();
+</script>
+{% endblock %}

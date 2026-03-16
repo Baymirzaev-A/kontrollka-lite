@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Сохраненные конфигурации{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>Сохраненные конфигурации</h2>
+    </div>
+
+    <table class="table">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Устройство</th>
+            <th>IP адрес</th>
+            <th>Дата сохранения</th>
+            <th>Действия</th>  <!-- Новая колонка -->
+        </tr>
+    </thead>
+    <tbody>
+        {% for config in configs %}
+        <tr>
+            <td>#{{ config.id }}</td>
+            <td>{{ config.device_name }}</td>
+            <td>{{ config.host }}</td>
+            <td>{{ config.saved_at }}</td>
+            <td>
+                <a href="/config/{{ config.id }}" class="btn btn-sm btn-primary">Просмотр</a>
+                <a href="/api/config/{{ config.id }}/download" class="btn btn-sm btn-success">Скачать</a>
+                <a href="/config/{{ config.id }}/delete" class="btn btn-sm btn-danger"
+                   onclick="return confirm('Удалить конфигурацию #{{ config.id }}?')">🗑️</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+    {% if not configs %}
+    <div class="alert alert-warning" style="text-align: center;">
+        Нет сохраненных конфигураций. Выполните команду display current-configuration и нажмите "Сохранить конфиг".
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

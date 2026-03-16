@@ -1,0 +1,199 @@
+import sqlite3
+from datetime import datetime
+
+
+class DeviceDB:
+    def __init__(self, db_file='devices.db'):
+        self.db_file = db_file
+        self.init_db()
+
+    def init_db(self):
+        """Создает таблицы если их нет"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+
+            # Таблица устройств
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS devices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    host TEXT NOT NULL,
+                    device_type TEXT NOT NULL,
+                    port INTEGER DEFAULT 22,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Таблица для сохраненных конфигураций
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id INTEGER,
+                    config_text TEXT,
+                    saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (device_id) REFERENCES devices (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Таблица для истории команд
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS command_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id INTEGER,
+                    command TEXT,
+                    output TEXT,
+                    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (device_id) REFERENCES devices (id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Добавим тестовые устройства если таблица пуста
+            cursor.execute("SELECT COUNT(*) FROM devices")
+            if cursor.fetchone()[0] == 0:
+                self.add_test_devices(conn)
+
+            conn.commit()
+
+    def add_test_devices(self, conn):
+        """Добавляет тестовые устройства"""
+        cursor = conn.cursor()
+        test_devices = [
+            ('switch-01', '10.0.0.2', 'huawei', 22, 'Коммутатор Huawei S5731'),
+            ('router-01', '10.0.0.1', 'huawei', 22, 'Маршрутизатор Huawei AR')
+        ]
+
+        for name, host, dev_type, port, desc in test_devices:
+            cursor.execute('''
+                INSERT INTO devices (name, host, device_type, port, description)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (name, host, dev_type, port, desc))
+
+    # ========== МЕТОДЫ ДЛЯ УСТРОЙСТВ ==========
+
+    def get_all_devices(self):
+        """Возвращает все устройства"""
+        with sqlite3.connect(self.db_file) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM devices ORDER BY name')
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_device(self, device_id):
+        """Возвращает устройство по ID"""
+        with sqlite3.connect(self.db_file) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM devices WHERE id = ?', (device_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def add_device(self, name, host, device_type='huawei', port=22, description=''):
+        """Добавляет новое устройство"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO devices (name, host, device_type, port, description)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (name, host, device_type, port, description))
+            conn.commit()
+            return cursor.lastrowid
+
+    def delete_device(self, device_id):
+        """Удаляет устройство"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM devices WHERE id = ?', (device_id,))
+            conn.commit()
+
+    # ========== МЕТОДЫ ДЛЯ КОНФИГУРАЦИЙ ==========
+
+    def save_config(self, device_id, config_text):
+        """Сохраняет конфигурацию"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO configs (device_id, config_text)
+                VALUES (?, ?)
+            ''', (device_id, config_text))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_config_history(self, device_id, limit=20):
+        """Возвращает историю конфигураций"""
+        with sqlite3.connect(self.db_file) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM configs 
+                WHERE device_id = ? 
+                ORDER BY saved_at DESC 
+                LIMIT ?
+            ''', (device_id, limit))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_config(self, config_id):
+        """Возвращает конфигурацию по ID"""
+        with sqlite3.connect(self.db_file) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM configs WHERE id = ?', (config_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_all_configs(self, limit=50):
+        """Возвращает все сохраненные конфигурации"""
+        with sqlite3.connect(self.db_file) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT c.*, d.name as device_name, d.host 
+                FROM configs c
+                JOIN devices d ON c.device_id = d.id
+                ORDER BY c.saved_at DESC 
+                LIMIT ?
+            ''', (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    # ========== МЕТОДЫ ДЛЯ ИСТОРИИ КОМАНД ==========
+
+    def save_command_history(self, device_id, command, output):
+        """Сохраняет команду в историю"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO command_history (device_id, command, output)
+                VALUES (?, ?, ?)
+            ''', (device_id, command, output[:5000]))
+            conn.commit()
+
+    def get_command_history(self, device_id, limit=50):
+        """Возвращает историю команд"""
+        with sqlite3.connect(self.db_file) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM command_history 
+                WHERE device_id = ? 
+                ORDER BY executed_at DESC 
+                LIMIT ?
+            ''', (device_id, limit))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_device(self, device_id, name, host, device_type, port, description):
+        """Обновляет данные устройства"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE devices 
+                SET name = ?, host = ?, device_type = ?, port = ?, description = ?
+                WHERE id = ?
+            ''', (name, host, device_type, port, description, device_id))
+            conn.commit()
+
+    def delete_config(self, config_id):
+        """Удаляет конфигурацию по ID"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM configs WHERE id = ?', (config_id,))
+            conn.commit()

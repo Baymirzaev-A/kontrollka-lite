@@ -1,0 +1,465 @@
+{% extends "base.html" %}
+
+{% block title %}Устройства{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>📋 Управление устройствами</h2>
+        <div>
+            <button class="btn btn-success" onclick="showAddDeviceModal()">➕ Добавить устройство</button>
+        </div>
+    </div>
+
+    <!-- Поиск и групповые операции -->
+    <div style="margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 250px;">
+            <input type="text" id="searchInput" class="form-control"
+                   placeholder="🔍 Поиск по имени, IP, описанию..."
+                   onkeyup="filterDevices()">
+        </div>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="goToGroupConsole()" id="groupBtn" disabled>
+                👥 Групповая консоль (<span id="selectedCount">0</span>)
+            </button>
+            <button class="btn btn-info" onclick="showGroupScriptModal()" id="groupScriptBtn" disabled>
+                📜 Скрипты для группы (<span id="selectedScriptCount">0</span>)
+            </button>
+            <button class="btn btn-secondary" onclick="selectAll()">Выбрать все</button>
+            <button class="btn btn-secondary" onclick="deselectAll()">Сбросить все</button>
+        </div>
+    </div>
+
+    <!-- Таблица устройств -->
+    <div style="overflow-x: auto;">
+        <table class="table" id="devicesTable">
+            <thead>
+                <tr>
+                    <th style="width: 40px;">
+                        <input type="checkbox" id="selectAllCheckbox" onchange="toggleAllCheckboxes()">
+                    </th>
+                    <th>Имя</th>
+                    <th>IP адрес</th>
+                    <th>Порт</th>
+                    <th>Тип</th>
+                    <th>Описание</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="devicesTableBody">
+                {% for device in devices %}
+                <tr class="device-row" data-name="{{ device.name|lower }}"
+                    data-host="{{ device.host }}"
+                    data-description="{{ device.description|lower }}">
+                    <td>
+                        <input type="checkbox" class="device-checkbox" value="{{ device.id }}" onchange="updateGroupButton()">
+                    </td>
+                    <td><strong>{{ device.name }}</strong></td>
+                    <td>{{ device.host }}</td>
+                    <td>{{ device.port }}</td>
+                    <td><span class="badge" style="background: #6c757d; color: white;">{{ device.device_type }}</span></td>
+                    <td>{{ device.description or '-' }}</td>
+                    <td>
+                        <a href="/device/{{ device.id }}" class="btn btn-primary btn-sm">Консоль</a>
+                        <button class="btn btn-info btn-sm" onclick="showScriptsForDevice({{ device.id }})">📜 Скрипты</button>
+                        <a href="/device/{{ device.id }}/edit" class="btn btn-warning btn-sm">✏️ Ред.</a>
+                        <button class="btn btn-danger btn-sm" onclick="deleteDevice({{ device.id }})">🗑️</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Сообщение если ничего не найдено -->
+    <div id="noResults" style="display: none; text-align: center; padding: 2rem; color: #6c757d;">
+        🕳️ Ничего не найдено
+    </div>
+
+    {% if not devices %}
+    <div class="alert alert-warning" style="text-align: center;">
+        Нет доступных устройств. Нажмите "➕ Добавить устройство" чтобы создать первое устройство.
+    </div>
+    {% endif %}
+</div>
+
+<!-- Модальное окно для добавления устройства -->
+<div id="deviceModal" class="modal">
+    <div class="modal-content">
+        <h3>➕ Добавить устройство</h3>
+        <form id="deviceForm">
+            <div class="form-group">
+                <label>Имя устройства *</label>
+                <input type="text" id="deviceName" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label>IP адрес *</label>
+                <input type="text" id="deviceHost" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label>Тип устройства</label>
+                <select id="deviceType" class="form-control">
+                    <option value="huawei">Huawei</option>
+                    <option value="cisco_ios">Cisco IOS</option>
+                    <option value="arista_eos">Arista EOS</option>
+                    <option value="juniper">Juniper</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Порт SSH</label>
+                <input type="number" id="devicePort" class="form-control" value="22">
+            </div>
+            <div class="form-group">
+                <label>Описание</label>
+                <input type="text" id="deviceDescription" class="form-control">
+            </div>
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="closeDeviceModal()">Отмена</button>
+                <button type="submit" class="btn btn-success">Сохранить</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Модальное окно выбора скрипта для одного устройства -->
+<div id="scriptModal" class="modal">
+    <div class="modal-content">
+        <h3>📜 Выберите скрипт для устройства</h3>
+        <div id="scriptList" style="margin: 1rem 0; max-height: 400px; overflow-y: auto;">
+            <!-- Скрипты загрузятся через JS -->
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" class="btn btn-secondary" onclick="closeScriptModal()">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно выбора скрипта для группы -->
+<div id="groupScriptModal" class="modal">
+    <div class="modal-content">
+        <h3>📜 Выберите скрипт для группы устройств</h3>
+        <p id="selectedDevicesInfo" style="color: #6c757d; margin-bottom: 1rem;"></p>
+        <div id="groupScriptList" style="margin: 1rem 0; max-height: 400px; overflow-y: auto;">
+            <!-- Скрипты загрузятся через JS -->
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+            <button type="button" class="btn btn-secondary" onclick="closeGroupScriptModal()">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ===== ФИЛЬТРАЦИЯ =====
+    function filterDevices() {
+        const searchText = document.getElementById('searchInput').value.toLowerCase();
+        const rows = document.querySelectorAll('.device-row');
+        let visibleCount = 0;
+
+        rows.forEach(row => {
+            const name = row.dataset.name || '';
+            const host = row.dataset.host || '';
+            const desc = row.dataset.description || '';
+
+            if (name.includes(searchText) || host.includes(searchText) || desc.includes(searchText)) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        document.getElementById('noResults').style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+
+    // ===== ЧЕКБОКСЫ =====
+    function updateGroupButton() {
+        const checkboxes = document.querySelectorAll('.device-checkbox:checked');
+        const count = checkboxes.length;
+        document.getElementById('selectedCount').textContent = count;
+        document.getElementById('selectedScriptCount').textContent = count;
+        document.getElementById('groupBtn').disabled = count === 0;
+        document.getElementById('groupScriptBtn').disabled = count === 0;
+    }
+
+    function toggleAllCheckboxes() {
+        const selectAll = document.getElementById('selectAllCheckbox').checked;
+        const checkboxes = document.querySelectorAll('.device-checkbox');
+        checkboxes.forEach(cb => {
+            cb.checked = selectAll;
+        });
+        updateGroupButton();
+    }
+
+    function selectAll() {
+        document.getElementById('selectAllCheckbox').checked = true;
+        toggleAllCheckboxes();
+    }
+
+    function deselectAll() {
+        document.getElementById('selectAllCheckbox').checked = false;
+        toggleAllCheckboxes();
+    }
+
+    function goToGroupConsole() {
+        const checkboxes = document.querySelectorAll('.device-checkbox:checked');
+        const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+        sessionStorage.setItem('selectedDevices', JSON.stringify(selectedIds));
+        window.location.href = '/group';
+    }
+
+    // ===== СКРИПТЫ ДЛЯ ОДНОГО УСТРОЙСТВА =====
+    let currentDeviceForScript = null;
+
+    function showScriptsForDevice(deviceId) {
+        currentDeviceForScript = deviceId;
+
+        fetch('/api/scripts')
+            .then(response => response.json())
+            .then(scripts => {
+                const list = document.getElementById('scriptList');
+                if (scripts.length === 0) {
+                    list.innerHTML = '<div style="text-align: center; padding: 2rem; color: #6c757d;">📭 Нет доступных скриптов</div>';
+                } else {
+                    list.innerHTML = scripts.map(s => `
+                        <div style="margin: 0.5rem 0; padding: 1rem; border: 1px solid #dee2e6; border-radius: 5px;">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <strong style="font-size: 1.1rem;">${s.name}</strong>
+                                    <p style="margin: 0.3rem 0; color: #666;">${s.description}</p>
+                                </div>
+                                <button class="btn btn-sm btn-primary" onclick="executeScript('${s.id}')">Выполнить</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+
+                document.getElementById('scriptModal').classList.add('active');
+            })
+            .catch(error => {
+                alert('❌ Ошибка загрузки скриптов: ' + error);
+            });
+    }
+
+    function executeScript(scriptId) {
+        if (!currentDeviceForScript) return;
+
+        closeScriptModal();
+        showLoading();
+
+        fetch(`/api/device/${currentDeviceForScript}/execute_script`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({script_id: scriptId})
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                if (data.post_check) {
+                    alert(`✅ Скрипт выполнен, но post-check: ${data.post_check.message}`);
+                } else {
+                    alert('✅ Скрипт успешно выполнен');
+                }
+                // Покажем результат в консоли браузера
+                console.log('Результат скрипта:', data.output);
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            alert('❌ Ошибка: ' + error);
+        });
+    }
+
+    function closeScriptModal() {
+        document.getElementById('scriptModal').classList.remove('active');
+        currentDeviceForScript = null;
+    }
+
+    // ===== СКРИПТЫ ДЛЯ ГРУППЫ =====
+    function showGroupScriptModal() {
+        const checkboxes = document.querySelectorAll('.device-checkbox:checked');
+        const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+        const selectedNames = Array.from(checkboxes).map(cb => {
+            const row = cb.closest('tr');
+            return row.querySelector('td:nth-child(2)').textContent.trim();
+        });
+
+        document.getElementById('selectedDevicesInfo').textContent =
+            `Выбрано устройств: ${selectedIds.length} (${selectedNames.join(', ')})`;
+
+        fetch('/api/scripts')
+            .then(response => response.json())
+            .then(scripts => {
+                const list = document.getElementById('groupScriptList');
+                if (scripts.length === 0) {
+                    list.innerHTML = '<div style="text-align: center; padding: 2rem; color: #6c757d;">📭 Нет доступных скриптов</div>';
+                } else {
+                    list.innerHTML = scripts.map(s => `
+                        <div style="margin: 0.5rem 0; padding: 1rem; border: 1px solid #dee2e6; border-radius: 5px;">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <strong style="font-size: 1.1rem;">${s.name}</strong>
+                                    <p style="margin: 0.3rem 0; color: #666;">${s.description}</p>
+                                </div>
+                                <button class="btn btn-sm btn-primary" onclick="executeGroupScript('${s.id}')">Выполнить на группе</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+
+                document.getElementById('groupScriptModal').classList.add('active');
+            })
+            .catch(error => {
+                alert('❌ Ошибка загрузки скриптов: ' + error);
+            });
+    }
+
+    function executeGroupScript(scriptId) {
+        const checkboxes = document.querySelectorAll('.device-checkbox:checked');
+        const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+
+        if (selectedIds.length === 0) {
+            alert('Нет выбранных устройств');
+            return;
+        }
+
+        closeGroupScriptModal();
+        showLoading();
+
+        fetch('/api/group/execute_script', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                script_id: scriptId,
+                device_ids: selectedIds
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+
+            if (data.success) {
+                let message = `✅ Скрипт выполнен на ${data.results.length} устройствах:\n`;
+                let successCount = data.results.filter(r => r.success).length;
+                let failCount = data.results.filter(r => !r.success).length;
+                message += `✅ Успешно: ${successCount}\n`;
+                message += `❌ Ошибок: ${failCount}`;
+
+                alert(message);
+                console.log('Результаты:', data.results);
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            alert('❌ Ошибка: ' + error);
+        });
+    }
+
+    function closeGroupScriptModal() {
+        document.getElementById('groupScriptModal').classList.remove('active');
+    }
+
+    // ===== УПРАВЛЕНИЕ УСТРОЙСТВАМИ =====
+    function showAddDeviceModal() {
+        document.getElementById('deviceModal').classList.add('active');
+    }
+
+    function closeDeviceModal() {
+        document.getElementById('deviceModal').classList.remove('active');
+    }
+
+    document.getElementById('deviceForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const deviceData = {
+            name: document.getElementById('deviceName').value,
+            host: document.getElementById('deviceHost').value,
+            device_type: document.getElementById('deviceType').value,
+            port: parseInt(document.getElementById('devicePort').value),
+            description: document.getElementById('deviceDescription').value
+        };
+
+        showLoading();
+
+        fetch('/api/device/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(deviceData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                alert('✅ Устройство добавлено');
+                window.location.reload();
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            alert('❌ Ошибка: ' + error);
+        });
+    });
+
+    function deleteDevice(deviceId) {
+        if (!confirm('Удалить устройство?')) return;
+
+        showLoading();
+
+        fetch(`/api/device/${deviceId}/delete`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                window.location.reload();
+            } else {
+                alert('❌ Ошибка: ' + data.error);
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            alert('❌ Ошибка: ' + error);
+        });
+    }
+
+    // Закрытие модалок по клику вне их
+    window.onclick = function(event) {
+        const deviceModal = document.getElementById('deviceModal');
+        const scriptModal = document.getElementById('scriptModal');
+        const groupScriptModal = document.getElementById('groupScriptModal');
+
+        if (event.target === deviceModal) {
+            closeDeviceModal();
+        }
+        if (event.target === scriptModal) {
+            closeScriptModal();
+        }
+        if (event.target === groupScriptModal) {
+            closeGroupScriptModal();
+        }
+    }
+</script>
+
+<style>
+    .table td, .table th {
+        vertical-align: middle;
+    }
+    .btn-sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+    }
+    #searchInput {
+        padding: 0.75rem;
+    }
+    .modal-content {
+        max-width: 600px;
+    }
+</style>
+{% endblock %}
